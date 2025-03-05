@@ -3,11 +3,12 @@ import cv2
 import base64
 import numpy as np
 from flask_socketio import SocketIO
+import time
 
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")  # Force WebSockets
 
-# Store active streams {device_name: latest frame}
+# Store active streams {device_name: {"frame": frame_data, "last_update": timestamp}}
 active_streams = {}
 
 @app.route('/')
@@ -24,7 +25,7 @@ def device_page():
 def register_device(data):
     """Register a device for streaming."""
     device_name = data['name']
-    active_streams[device_name] = None
+    active_streams[device_name] = {"frame": None, "last_update": time.time()}
     print(f"✅ Device registered: {device_name}")
 
 @socketio.on('frame')
@@ -38,7 +39,8 @@ def receive_frame(data):
         frame = cv2.imdecode(frame, cv2.IMREAD_COLOR)
 
         _, buffer = cv2.imencode('.jpg', frame)
-        active_streams[device_name] = buffer.tobytes()
+        active_streams[device_name]["frame"] = buffer.tobytes()
+        active_streams[device_name]["last_update"] = time.time()  # Update the timestamp
 
         print(f"✅ Received frame from {device_name} - Size: {len(frame_data)} bytes")  # Debug log
     except Exception as e:
@@ -49,23 +51,25 @@ def video_feed(device_name):
     """Send video stream to admin panel."""
     def generate():
         while True:
-            if device_name in active_streams and active_streams[device_name]:
+            if device_name in active_streams and active_streams[device_name]["frame"]:
                 yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + active_streams[device_name] + b'\r\n')
+                       b'Content-Type: image/jpeg\r\n\r\n' + active_streams[device_name]["frame"] + b'\r\n')
 
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
-
 @app.route('/refresh_devices')
 def refresh_devices():
-    """Remove devices that are not sending data."""
+    """Remove devices that have not sent data in the last 10 seconds."""
     global active_streams
-    active_streams = {k: v for k, v in active_streams.items() if v is not None}
-    return jsonify({"devices": list(active_streams.keys())})
+    current_time = time.time()
+    inactive_devices = [name for name, data in active_streams.items() if current_time - data["last_update"] > 10]
+    
+    for device in inactive_devices:
+        del active_streams[device]
+        print(f"❌ Removed inactive device: {device}")
 
-import os
+    return jsonify({"devices": list(active_streams.keys())})
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))  # Use Railway's port
     socketio.run(app, host="0.0.0.0", port=port, debug=False)
-

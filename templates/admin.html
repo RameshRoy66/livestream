@@ -46,13 +46,18 @@
           .then((response) => response.json())
           .then((data) => {
             const select = document.getElementById('deviceSelect');
-            select.innerHTML = '';
+            select.innerHTML = ''; // Clear existing options
             data.devices.forEach((device) => {
               const option = document.createElement('option');
               option.value = device;
               option.textContent = device;
               select.appendChild(option);
             });
+            alert('Devices refreshed!');
+          })
+          .catch((error) => {
+            console.error('Error refreshing devices:', error);
+            alert('Error refreshing devices. Please try again.');
           });
       }
     </script>
@@ -61,7 +66,7 @@
     <div class="container">
       <h2 class="text-center mb-4">Admin Panel - View Live Streams</h2>
 
-      <div class="mb-3">
+      <div class="mb-5">
         <label for="deviceSelect" class="form-label">Select Device:</label>
         <select id="deviceSelect" class="form-select">
           {% for name in devices %}
@@ -70,7 +75,7 @@
         </select>
       </div>
 
-      <div class="d-grid gap-2 d-md-block">
+      <div class="d-grid gap-2 d-md-block mt-5">
         <button class="btn btn-primary" onclick="viewStream()">
           View Stream
         </button>
