@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, Response
+from flask import Flask, render_template, request, Response, jsonify
 import cv2
 import base64
 import numpy as np
@@ -54,6 +54,14 @@ def video_feed(device_name):
                        b'Content-Type: image/jpeg\r\n\r\n' + active_streams[device_name] + b'\r\n')
 
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+@app.route('/refresh_devices')
+def refresh_devices():
+    """Remove devices that are not sending data."""
+    global active_streams
+    active_streams = {k: v for k, v in active_streams.items() if v is not None}
+    return jsonify({"devices": list(active_streams.keys())})
 
 import os
 
