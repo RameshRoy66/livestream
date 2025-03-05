@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Mobile Camera Streaming</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.4.1/socket.io.js"></script>
+  </head>
+  <body>
+    <h2>Start Streaming</h2>
+    <input type="text" id="deviceName" placeholder="Enter Device Name" />
+    <button onclick="startStreaming()">Start Stream</button>
+    <video id="video" autoplay playsinline></video>
+
+    <script>
+      const socket = io('http://192.168.2.151:5000', {
+        transports: ['websocket'],
+      });
+
+      function startStreaming() {
+        let deviceName = document.getElementById('deviceName').value;
+        if (!deviceName) {
+          alert('Enter a device name!');
+          return;
+        }
+        socket.emit('register', { name: deviceName });
+
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          alert('❌ Camera access not supported on this browser!');
+          return;
+        }
+
+        navigator.mediaDevices
+          .getUserMedia({ video: true })
+          .then((stream) => {
+            document.getElementById('video').srcObject = stream;
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const video = document.getElementById('video');
+
+            function sendFrame() {
+              if (!video.videoWidth) {
+                requestAnimationFrame(sendFrame);
+                return;
+              }
+              canvas.width = video.videoWidth;
+              canvas.height = video.videoHeight;
+              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+              let frame = canvas.toDataURL('image/jpeg', 0.6); // 0.6 for compression
+
+              socket.emit('frame', { name: deviceName, frame: frame });
+
+              requestAnimationFrame(sendFrame);
+            }
+            sendFrame(); // Start sending frames
+          })
+          .catch((err) => {
+            console.error('❌ Camera access denied!', err);
+            alert('❌ Camera permission denied. Please allow camera access.');
+          });
+      }
+    </script>
+  </body>
+</html>

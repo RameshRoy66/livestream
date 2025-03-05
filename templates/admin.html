@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Admin - Live Streams</title>
+    <script>
+      function viewStream() {
+        var deviceName = document.getElementById('deviceSelect').value;
+        if (!deviceName) {
+          alert('No device selected!');
+          return;
+        }
+        console.log('Fetching stream from: ' + '/video_feed/' + deviceName);
+        document.getElementById('videoStream').src =
+          '/video_feed/' + deviceName;
+      }
+    </script>
+  </head>
+  <body>
+    <h2>Admin Panel - View Live Streams</h2>
+
+    <label for="deviceSelect">Select Device:</label>
+    <select id="deviceSelect">
+      {% for name in devices %}
+      <option value="{{ name }}">{{ name }}</option>
+      {% endfor %}
+    </select>
+
+    <button onclick="viewStream()">View Stream</button>
+
+    <br /><br />
+    <img id="videoStream" src="" width="640" height="480" />
+  </body>
+</html>
