@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Device - Multi-Admin Stream</title>
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 20px;
+        background: black;
+        color: white;
+      }
+      video {
+        width: 400px;
+        border: 1px solid #ccc;
+        background: #000;
+      }
+      #registration {
+        margin-bottom: 20px;
+      }
+      #deviceNameInput {
+        padding: 8px;
+        margin-right: 10px;
+        width: 200px;
+      }
+      #registerBtn {
+        padding: 8px 16px;
+        background-color: #4caf50;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      #registerBtn:hover {
+        background-color: #45a049;
+      }
+      #statusText {
+        margin-top: 10px;
+        font-weight: bold;
+      }
+      #adminCount {
+        color: #4caf50;
+        font-weight: bold;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Device Streaming Page</h1>
+
+    <div id="registration">
+      <input type="text" id="deviceNameInput" placeholder="Enter device name" />
+      <button id="registerBtn">Register Device</button>
+    </div>
+
+    <div id="streamSection" style="display: none">
+      <h3>Stream Status (<span id="adminCount">0</span> admins watching)</h3>
+      <video id="localVideo" autoplay playsinline muted></video>
+      <p id="statusText">Registered. Waiting for admin connections...</p>
+      <audio id="remoteAudio" autoplay></audio>
+    </div>
+
+    <script>
+      const socket = io();
+      let deviceName = null;
+      let currentFacingMode = 'environment';
+      let isSwitching = false;
+
+      // Track all active admin connections
+      const adminConnections = new Map(); // Map<adminId, { pc: RTCPeerConnection, audioStream: MediaStream }>
+      let localStream = null;
+
+      const configuration = {
+        iceServers: [
+              { urls: ['stun:ss-turn1.xirsys.com'] },
+              {
+                username:
+                  '84jBdtXd3EWm7_60Y6c7HxgYV0Cqwo2hNpN9oEbYhdvSxLU-qeTd9Oz3Ll_zm3U0AAAAAGfemddyYW1lc2hyb3k2Ng==',
+                credential: 'c8a6bfd4-070d-11f0-ac2d-0242ac140004',
+                urls: [
+                  'turn:ss-turn1.xirsys.com:80?transport=udp',
+                  'turn:ss-turn1.xirsys.com:3478?transport=udp',
+                  'turn:ss-turn1.xirsys.com:80?transport=tcp',
+                  'turn:ss-turn1.xirsys.com:3478?transport=tcp',
+                  'turns:ss-turn1.xirsys.com:443?transport=tcp',
+                  'turns:ss-turn1.xirsys.com:5349?transport=tcp',
+                ],
+              },
+            ],
+      };
+
+      // Register device
+      document.getElementById('registerBtn').addEventListener('click', () => {
+        deviceName = document.getElementById('deviceNameInput').value.trim();
+        if (!deviceName) {
+          alert('Please enter a device name.');
+          return;
+        }
+        socket.emit('register_device', { device_name: deviceName });
+        document.getElementById('registration').style.display = 'none';
+        document.getElementById('streamSection').style.display = 'block';
+        updateStatus('Registered. Waiting for admin connections...');
+      });
+
+      function updateStatus(message) {
+        document.getElementById('statusText').textContent = message;
+      }
+
+      function updateAdminCount() {
+        document.getElementById('adminCount').textContent =
+          adminConnections.size;
+      }
+
+      // Start media only if not already active
+      async function startMediaIfNeeded() {
+        if (localStream) return localStream;
+
+        updateStatus('Starting camera...');
+        try {
+          // Try with audio first, fallback to video only
+          try {
+            localStream = await navigator.mediaDevices.getUserMedia({
+              video: { facingMode: currentFacingMode },
+              audio: true,
+            });
+          } catch (audioError) {
+            console.warn('Audio not available, using video only');
+            localStream = await navigator.mediaDevices.getUserMedia({
+              video: { facingMode: currentFacingMode },
+            });
+          }
+          document.getElementById('localVideo').srcObject = localStream;
+          return localStream;
+        } catch (err) {
+          console.error('Media access failed:', err);
+          updateStatus('Error accessing camera');
+          throw err;
+        }
+      }
+
+      // Clean up media when no more admins are watching
+      function checkMediaStop() {
+        if (adminConnections.size === 0 && localStream) {
+          updateStatus('No active viewers. Stopping stream...');
+          localStream.getTracks().forEach((track) => track.stop());
+          localStream = null;
+          document.getElementById('localVideo').srcObject = null;
+        }
+      }
+
+      // Handle WebRTC offer from admin
+      socket.on('webrtc_offer', async (data) => {
+        const adminId = data.from;
+
+        // If we already have a connection to this admin, ignore
+        if (adminConnections.has(adminId)) return;
+
+        updateStatus(`Admin ${adminId.substring(0, 6)} connecting...`);
+
+        try {
+          const stream = await startMediaIfNeeded();
+          const pc = new RTCPeerConnection(configuration);
+          const audioStream = new MediaStream();
+
+          // Store the connection
+          adminConnections.set(adminId, { pc, audioStream });
+          updateAdminCount();
+
+          // Add our media tracks
+          stream.getTracks().forEach((track) => {
+            pc.addTrack(track, stream);
+          });
+
+          // Handle ICE candidates
+          pc.onicecandidate = (event) => {
+            if (event.candidate) {
+              socket.emit('webrtc_candidate', {
+                target: adminId,
+                candidate: event.candidate,
+                from: deviceName,
+              });
+            }
+          };
+
+          // Handle connection state
+          pc.onconnectionstatechange = () => {
+            if (
+              pc.connectionState === 'disconnected' ||
+              pc.connectionState === 'failed'
+            ) {
+              cleanupAdminConnection(adminId);
+            }
+          };
+
+          // Handle incoming audio
+          pc.ontrack = (event) => {
+            event.streams[0].getTracks().forEach((track) => {
+              if (track.kind === 'audio') {
+                audioStream.addTrack(track);
+              }
+            });
+            document.getElementById('remoteAudio').srcObject = audioStream;
+          };
+
+          // Process the offer
+          await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+
+          socket.emit('webrtc_answer', {
+            target: adminId,
+            answer: answer,
+            from: deviceName,
+          });
+
+          updateStatus(`Streaming to ${adminConnections.size} admin(s)`);
+        } catch (err) {
+          console.error('Connection setup failed:', err);
+          cleanupAdminConnection(adminId);
+          updateStatus('Error setting up connection');
+        }
+      });
+
+      // Clean up a specific admin connection
+      function cleanupAdminConnection(adminId) {
+        if (adminConnections.has(adminId)) {
+          const { pc, audioStream } = adminConnections.get(adminId);
+          pc.close();
+          audioStream.getTracks().forEach((track) => track.stop());
+          adminConnections.delete(adminId);
+          updateAdminCount();
+          updateStatus(
+            adminConnections.size > 0
+              ? `Streaming to ${adminConnections.size} admin(s)`
+              : 'No active viewers'
+          );
+          checkMediaStop();
+        }
+      }
+
+      // Handle stop streaming command for specific admin
+      socket.on('stop_streaming', (data) => {
+        if (data.target === deviceName && data.from) {
+          cleanupAdminConnection(data.from);
+        }
+      });
+
+      // Handle ICE candidates from admin
+      socket.on('webrtc_candidate', async (data) => {
+        if (adminConnections.has(data.from) && data.candidate) {
+          try {
+            await adminConnections
+              .get(data.from)
+              .pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+          } catch (err) {
+            console.error('Error adding ICE candidate:', err);
+          }
+        }
+      });
+
+      // Handle camera switch command
+      socket.on('switch_camera', async (data) => {
+        if (!adminConnections.has(data.from) || isSwitching) return;
+
+        isSwitching = true;
+        updateStatus('Switching camera...');
+
+        try {
+          // Toggle facing mode
+          currentFacingMode =
+            currentFacingMode === 'environment' ? 'user' : 'environment';
+
+          // Get new video stream
+          const newStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: currentFacingMode },
+            audio: false,
+          });
+          const newVideoTrack = newStream.getVideoTracks()[0];
+
+          // Replace track in all active connections
+          for (const [adminId, { pc }] of adminConnections) {
+            const videoSender = pc
+              .getSenders()
+              .find((sender) => sender.track.kind === 'video');
+
+            if (videoSender) {
+              videoSender.track.stop();
+              await videoSender.replaceTrack(newVideoTrack);
+            }
+          }
+
+          // Update local preview
+          document.getElementById('localVideo').srcObject = newStream;
+
+          // Keep existing audio if available
+          if (localStream && localStream.getAudioTracks().length > 0) {
+            newStream.addTrack(localStream.getAudioTracks()[0]);
+          }
+
+          localStream = newStream;
+          updateStatus(`Streaming to ${adminConnections.size} admin(s)`);
+        } catch (err) {
+          console.error('Camera switch failed:', err);
+          updateStatus('Error switching camera');
+        } finally {
+          isSwitching = false;
+        }
+      });
+    </script>
+  </body>
+</html>

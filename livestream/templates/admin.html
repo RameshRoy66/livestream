@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Durga Infra Mining – Admin Panel</title>
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <style>
+      /* General Styling */
+      body {
+        font-family: 'Arial', sans-serif;
+        background-color: #121212;
+        color: #fff;
+        margin: 20px;
+      }
+
+      h1 {
+        font-size: 28px;
+        font-weight: bold;
+        text-transform: uppercase;
+        text-align: center;
+        color: #ffcc00;
+        margin-bottom: 25px;
+        text-shadow: 2px 2px 10px rgba(255, 204, 0, 0.8);
+      }
+
+      .container {
+        max-width: 1100px;
+      }
+
+      /* Card Styling */
+      .card {
+        background: linear-gradient(145deg, #1b1b1b, #292929);
+        border: 1px solid #ffcc00;
+        border-radius: 12px;
+        padding: 10px;
+        box-shadow: 0px 5px 20px rgba(255, 204, 0, 0.3);
+        transition: 0.3s;
+      }
+
+      /* Dropdown and Button Styling */
+      select,
+      .btn-custom {
+        font-size: 15px;
+        font-weight: bold;
+        padding: 8px;
+        border-radius: 8px;
+        transition: 0.3s;
+      }
+
+      .btn-custom {
+        background: #ffcc00;
+        color: #121212;
+        border: none;
+        box-shadow: 0px 4px 10px rgba(255, 204, 0, 0.5);
+      }
+
+      .btn-custom:hover {
+        background: #0dcaf0 !important;
+        color: white;
+      }
+
+      /* Video Styling */
+      video {
+        border: 3px solid #ffcc00;
+        border-radius: 10px;
+        width: 100%;
+        max-width: 500px;
+        height: 400px;
+        display: block;
+        margin: 10px auto;
+      }
+
+      /* Multiple Streams */
+      #allStreamsContainer video {
+        width: 100%;
+        max-width: 320px;
+        display: inline-block;
+        margin: 10px;
+        border-radius: 8px;
+      }
+
+      /* Grid Styling */
+      .row {
+        margin-top: 10px;
+      }
+
+      /* Spinner animation */
+      .spinner-border {
+        display: inline-block;
+        width: 1rem;
+        height: 1rem;
+        vertical-align: text-bottom;
+        border: 0.2em solid currentColor;
+        border-right-color: transparent;
+        border-radius: 50%;
+        animation: spinner-border 0.75s linear infinite;
+      }
+
+      @keyframes spinner-border {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      #switchCameraBtn:disabled {
+        background-color: #ffcc00 !important;
+        color: #121212 !important;
+        opacity: 1 !important;
+      }
+
+      /* Success feedback */
+      .btn-custom.switch-success {
+        background-color: #28a745 !important;
+        color: white !important;
+        transition: all 0.3s ease;
+      }
+
+      /* Pulsing effect during switch */
+      .btn-custom.switching {
+        animation: pulse 1s infinite;
+      }
+
+      @keyframes pulse {
+        0% {
+          transform: scale(1);
+        }
+        50% {
+          transform: scale(1.05);
+        }
+        100% {
+          transform: scale(1);
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="container">
+      <h1>Durga Infra Mining – Admin Panel</h1>
+      <p
+        id="noMicMsg"
+        class="text-warning text-center mt-2"
+        style="display: none"
+      >
+        No Microphone Access – Audio will be disabled.
+      </p>
+
+      <div class="card">
+        <div class="row">
+          <div class="col-md-6">
+            <label class="text-white" for="deviceSelect">Select Device:</label>
+            <select id="deviceSelect" class="form-select">
+              <option value="" disabled selected>Select Device</option>
+            </select>
+          </div>
+          <div class="col-md-2 d-grid">
+            <button id="viewBtn" class="btn btn-custom mt-3">
+              View Device
+            </button>
+          </div>
+          <div class="col-md-2 d-grid">
+            <button id="viewAllBtn" class="btn btn-custom mt-3">
+              View All Streams
+            </button>
+          </div>
+          <!-- Add this button near the device selection dropdown -->
+          <div class="col-md-2 d-grid">
+            <button id="refreshBtn" class="btn btn-custom mt-3">
+              Refresh Devices
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="container-fluid">
+      <!-- Single Stream Container -->
+      <div id="singleStreamContainer" class="card mt-4" style="display: none">
+        <h3 class="text-center text-white">Live Streaming</h3>
+        <div class="d-flex align-items-center">
+          <video
+            id="remoteVideo"
+            autoplay
+            playsinline
+            controls
+            style="margin-right: 190px"
+          ></video>
+
+          <button
+            id="switchCameraBtn"
+            class="btn btn-custom"
+            style="
+              display: none;
+              margin-right: 150px;
+              height: 120px;
+              border-radius: 100%;
+            "
+          >
+            Switch Camera
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- All Streams Container -->
+    <div id="allStreamsContainer" class="card mt-4" style="display: none">
+      <h3 class="text-center">All Device Streams</h3>
+      <div class="row">
+        <div class="text-center" id="streamGrid">
+          <!-- Video elements will be dynamically added here -->
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const socket = io();
+      let adminId = null;
+      let adminMode = ''; // "single" or "all"
+      let currentDevice = null;
+      let pc = null; // for single mode connection
+      let allConns = {}; // for all mode: mapping device name → RTCPeerConnection
+      let candidateQueues = {}; // for all mode: mapping device name → queued candidates
+      let allDevices = []; // list of device names (updated from server)
+      let adminAudioStream = null; // Track the admin's microphone stream
+
+      const configuration = {
+       iceServers: [
+              { urls: ['stun:ss-turn1.xirsys.com'] },
+              {
+                username:
+                  '84jBdtXd3EWm7_60Y6c7HxgYV0Cqwo2hNpN9oEbYhdvSxLU-qeTd9Oz3Ll_zm3U0AAAAAGfemddyYW1lc2hyb3k2Ng==',
+                credential: 'c8a6bfd4-070d-11f0-ac2d-0242ac140004',
+                urls: [
+                  'turn:ss-turn1.xirsys.com:80?transport=udp',
+                  'turn:ss-turn1.xirsys.com:3478?transport=udp',
+                  'turn:ss-turn1.xirsys.com:80?transport=tcp',
+                  'turn:ss-turn1.xirsys.com:3478?transport=tcp',
+                  'turns:ss-turn1.xirsys.com:443?transport=tcp',
+                  'turns:ss-turn1.xirsys.com:5349?transport=tcp',
+                ],
+              },
+            ],
+      };
+
+      socket.on('connect', () => {
+        adminId = socket.id;
+        socket.emit('join_admin');
+        console.log('Admin connected with id:', adminId);
+      });
+
+      // Update device list and populate the dropdown
+      socket.on('update_device_list', (deviceList) => {
+        allDevices = deviceList;
+        const select = document.getElementById('deviceSelect');
+        select.innerHTML = '';
+        if (deviceList.length === 0) {
+          let option = document.createElement('option');
+          option.textContent = '-- No devices --';
+          option.disabled = true;
+          option.selected = true;
+          select.appendChild(option);
+        } else {
+          deviceList.forEach((device) => {
+            let option = document.createElement('option');
+            option.value = device;
+            option.textContent = device;
+            select.appendChild(option);
+          });
+        }
+      });
+
+      //////////////////////////////////////////////////////
+      // ICE Candidate Handling (for both modes)
+      //////////////////////////////////////////////////////
+      socket.on('webrtc_candidate', async (data) => {
+        if (!data.candidate) return;
+        // For single connection mode:
+        if (adminMode === 'single') {
+          if (pc && pc.remoteDescription && pc.remoteDescription.type) {
+            try {
+              await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+              console.log('Added ICE candidate immediately (single).');
+            } catch (err) {
+              console.error('Error adding ICE candidate (single):', err);
+            }
+          } else {
+            console.log('Queueing ICE candidate (single).');
+            if (!pc.candidateQueue) pc.candidateQueue = [];
+            pc.candidateQueue.push(data.candidate);
+          }
+        }
+        // For all streams mode:
+        else if (adminMode === 'all') {
+          const fromDevice = data.from;
+          if (allConns[fromDevice]) {
+            let connection = allConns[fromDevice];
+            if (
+              connection.remoteDescription &&
+              connection.remoteDescription.type
+            ) {
+              try {
+                await connection.addIceCandidate(
+                  new RTCIceCandidate(data.candidate)
+                );
+                console.log('Added ICE candidate immediately for', fromDevice);
+              } catch (err) {
+                console.error(
+                  'Error adding ICE candidate for',
+                  fromDevice,
+                  err
+                );
+              }
+            } else {
+              console.log('Queueing ICE candidate for', fromDevice);
+              if (!candidateQueues[fromDevice])
+                candidateQueues[fromDevice] = [];
+              candidateQueues[fromDevice].push(data.candidate);
+            }
+          }
+        }
+      });
+
+      async function processQueuedCandidatesSingle() {
+        if (pc && pc.candidateQueue && pc.candidateQueue.length > 0) {
+          while (pc.candidateQueue.length) {
+            let candidate = pc.candidateQueue.shift();
+            try {
+              await pc.addIceCandidate(new RTCIceCandidate(candidate));
+              console.log('Processed queued ICE candidate (single).');
+            } catch (err) {
+              console.error('Error processing queued candidate (single):', err);
+            }
+          }
+        }
+      }
+
+      async function processQueuedCandidatesAll(device) {
+        if (candidateQueues[device] && candidateQueues[device].length > 0) {
+          while (candidateQueues[device].length) {
+            let candidate = candidateQueues[device].shift();
+            try {
+              await allConns[device].addIceCandidate(
+                new RTCIceCandidate(candidate)
+              );
+              console.log('Processed queued ICE candidate for', device);
+            } catch (err) {
+              console.error(
+                'Error processing queued candidate for',
+                device,
+                err
+              );
+            }
+          }
+        }
+      }
+
+      //////////////////////////////////////////////////////
+      // Answer Handling
+      //////////////////////////////////////////////////////
+      socket.on('webrtc_answer', async (data) => {
+        console.log('Received answer:', data);
+        if (adminMode === 'single') {
+          try {
+            await pc.setRemoteDescription(
+              new RTCSessionDescription(data.answer)
+            );
+            console.log('Remote description set for single mode.');
+            await processQueuedCandidatesSingle();
+          } catch (err) {
+            console.error('Error setting remote description (single):', err);
+          }
+        } else if (adminMode === 'all') {
+          const fromDevice = data.from;
+          if (allConns[fromDevice]) {
+            try {
+              await allConns[fromDevice].setRemoteDescription(
+                new RTCSessionDescription(data.answer)
+              );
+              console.log('Remote description set for', fromDevice);
+              await processQueuedCandidatesAll(fromDevice);
+            } catch (err) {
+              console.error(
+                'Error setting remote description for',
+                fromDevice,
+                err
+              );
+            }
+          }
+        }
+      });
+
+      // Refresh button functionality
+      document.getElementById('refreshBtn').addEventListener('click', () => {
+        socket.emit('refresh_command');
+      });
+
+      socket.on('update_device_list', (devices) => {
+        const deviceList = document.getElementById('deviceList');
+        deviceList.innerHTML = '';
+        devices.forEach((device) => {
+          const li = document.createElement('li');
+          li.textContent = device;
+          li.classList.add('device-item');
+          li.addEventListener('click', () => {
+            console.log(`Requesting refresh for ${device}`);
+            socket.emit('send_refresh_command', device);
+          });
+          deviceList.appendChild(li);
+        });
+      });
+
+      // When leaving single view mode, stop the device stream
+      function stopSingleView() {
+        if (pc) {
+          pc.close();
+          pc = null;
+          // Notify device to stop streaming
+          if (currentDevice) {
+            socket.emit('stop_streaming', { target: currentDevice });
+          }
+        }
+        document.getElementById('singleStreamContainer').style.display = 'none';
+      }
+
+      // When leaving all view mode, stop all streams
+      function stopAllView() {
+        Object.keys(allConns).forEach((device) => {
+          allConns[device].close();
+          socket.emit('stop_streaming', { target: device });
+        });
+        allConns = {};
+        document.getElementById('allStreamsContainer').style.display = 'none';
+      }
+
+      //////////////////////////////////////////////////////
+      // Single Device Mode: View Device Button
+      //////////////////////////////////////////////////////
+      document.getElementById('viewBtn').addEventListener('click', async () => {
+        stopAllView();
+
+        adminMode = 'single';
+
+        // Reset all streams mode
+        Object.values(allConns).forEach((conn) => {
+          conn.getSenders().forEach((sender) => conn.removeTrack(sender)); // Remove all tracks
+          conn.close();
+        });
+        allConns = {};
+        candidateQueues = {};
+
+        // Hide multi-stream container if visible
+        document.getElementById('allStreamsContainer').style.display = 'none';
+        document.getElementById('singleStreamContainer').style.display =
+          'block';
+
+        const select = document.getElementById('deviceSelect');
+        const targetDevice = select.value;
+        if (!targetDevice) {
+          alert('Please select a device');
+          return;
+        }
+
+        // Stop and reset previous connection if switching devices
+        if (pc) {
+          pc.getSenders().forEach((sender) => pc.removeTrack(sender)); // Remove all tracks
+          pc.close();
+          pc = null;
+        }
+
+        currentDevice = targetDevice;
+        pc = new RTCPeerConnection(configuration);
+
+        // Get admin's microphone audio stream (if not already available)
+        // Try to get admin's microphone audio stream (optional)
+        if (!adminAudioStream) {
+          try {
+            adminAudioStream = await navigator.mediaDevices.getUserMedia({
+              audio: true,
+            });
+          } catch (err) {
+            console.warn('⚠ No microphone access. Proceeding without audio.');
+            document.getElementById('noMicMsg').style.display = 'block';
+            adminAudioStream = null;
+          }
+        }
+
+        // If microphone is available, add audio tracks
+        if (adminAudioStream) {
+          adminAudioStream.getTracks().forEach((track) => {
+            pc.addTrack(track, adminAudioStream);
+          });
+        }
+
+        // Admin receives video from the selected device
+        pc.addTransceiver('video', { direction: 'recvonly' });
+
+        pc.onicecandidate = (event) => {
+          if (event.candidate) {
+            socket.emit('webrtc_candidate', {
+              target: currentDevice,
+              candidate: event.candidate,
+              from: adminId,
+            });
+          }
+        };
+
+        const remoteStream = new MediaStream();
+        pc.ontrack = (event) => {
+          event.streams[0].getTracks().forEach((track) => {
+            remoteStream.addTrack(track);
+          });
+          document.getElementById('remoteVideo').srcObject = remoteStream;
+        };
+
+        try {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          socket.emit('webrtc_offer', {
+            target: currentDevice,
+            offer: offer,
+            from: adminId,
+          });
+          console.log('Offer sent to device:', currentDevice);
+          document.getElementById('switchCameraBtn').style.display =
+            'inline-block';
+        } catch (err) {
+          console.error('Error creating offer (single):', err);
+        }
+      });
+      //////////////////////////////////////////////////////
+      // All Streams Mode: View All Streams Button
+      //////////////////////////////////////////////////////
+      document
+        .getElementById('viewAllBtn')
+        .addEventListener('click', async () => {
+          stopSingleView();
+          adminMode = 'all';
+
+          // Reset single device mode
+          if (pc) {
+            pc.getSenders().forEach((sender) => pc.removeTrack(sender));
+            pc.close();
+            pc = null;
+          }
+
+          // Hide single stream container
+          document.getElementById('singleStreamContainer').style.display =
+            'none';
+
+          // Clear and show all streams container
+          const allContainer = document.getElementById('allStreamsContainer');
+          allContainer.innerHTML = '';
+          allContainer.style.display = 'flex';
+          allContainer.className = 'row';
+
+          // Try to get admin's microphone audio stream (optional)
+          if (!adminAudioStream) {
+            try {
+              adminAudioStream = await navigator.mediaDevices.getUserMedia({
+                audio: true,
+              });
+            } catch (err) {
+              console.warn('⚠ No microphone access. Proceeding without audio.');
+              document.getElementById('noMicMsg').style.display = 'block';
+              adminAudioStream = null;
+            }
+          }
+
+          // Create a connection for each device
+          allDevices.forEach(async (device) => {
+            const streamDiv = document.createElement('div');
+            streamDiv.className = 'col-sm-3 mb-3';
+
+            const title = document.createElement('h4');
+            title.innerText = device;
+            streamDiv.appendChild(title);
+
+            const videoElem = document.createElement('video');
+            videoElem.id = 'video_' + device;
+            videoElem.autoplay = true;
+            videoElem.playsInline = true;
+            videoElem.controls = true;
+            videoElem.className = 'w-100';
+            streamDiv.appendChild(videoElem);
+
+            allContainer.appendChild(streamDiv);
+
+            let connection = new RTCPeerConnection(configuration);
+            allConns[device] = connection;
+            candidateQueues[device] = [];
+
+            // If we have audio, add it
+            if (adminAudioStream) {
+              adminAudioStream.getTracks().forEach((track) => {
+                connection.addTrack(track, adminAudioStream);
+              });
+            }
+
+            // Always add video transceiver (recvonly) so we get video
+            connection.addTransceiver('video', { direction: 'recvonly' });
+
+            connection.onicecandidate = (event) => {
+              if (event.candidate) {
+                socket.emit('webrtc_candidate', {
+                  target: device,
+                  candidate: event.candidate,
+                  from: adminId,
+                });
+              }
+            };
+
+            connection.ontrack = (event) => {
+              const rstream = event.streams[0];
+              const videoElement = document.getElementById('video_' + device);
+              videoElement.srcObject = new MediaStream(
+                rstream.getVideoTracks()
+              );
+            };
+
+            try {
+              const offer = await connection.createOffer();
+              await connection.setLocalDescription(offer);
+              socket.emit('webrtc_offer', {
+                target: device,
+                offer: offer,
+                from: adminId,
+              });
+              console.log('Offer sent to device (all mode):', device);
+            } catch (err) {
+              console.error('Error creating offer for device', device, err);
+            }
+          });
+        });
+
+      //////////////////////////////////////////////////////
+      // Optional: Switch Camera (applies only in single mode)
+      //////////////////////////////////////////////////////
+      document
+        .getElementById('switchCameraBtn')
+        .addEventListener('click', () => {
+          if (!currentDevice) {
+            alert('No device selected.');
+            return;
+          }
+          if (!pc || pc.connectionState !== 'connected') {
+            alert('No active connection to device.');
+            return;
+          }
+
+          const btn = document.getElementById('switchCameraBtn');
+          btn.disabled = true;
+          btn.innerHTML = `
+            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+            Switching...
+        `;
+
+          socket.emit('switch_camera', {
+            target: currentDevice,
+            from: adminId,
+          });
+
+          setTimeout(() => {
+            btn.disabled = false;
+            btn.innerHTML = 'Switch Camera';
+
+            // Add temporary success feedback
+            btn.classList.add('switch-success');
+            setTimeout(() => btn.classList.remove('switch-success'), 1000);
+          }, 2000);
+        });
+    </script>
+  </body>
+</html>
